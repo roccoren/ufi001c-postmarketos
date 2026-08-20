@@ -313,3 +313,34 @@ Craft Agent 的 sandbox 是 Ubuntu 24.04 x86_64（8GB RAM，58GB 磁盘）。构
 - 或者直接从这台 Linux 上 `scp` 补丁上传给你
 
 祝刷机顺利 🚀
+
+## 🔍 Boot Image DTB Fix (v26.06-2 CRITICAL)
+
+**Symptom**: `fastboot boot boot.img` fails with `"dtb not found"` on `LK1ST_MSM8916` bootloader.
+
+**Root cause**: Qualcomm LK-based bootloaders (LK1ST, aboot) read the appended DTB offset from **kernel byte 0x2C** (a 32-bit little-endian value). For ARM 32-bit kernels, the kernel image build sets this. **For ARM64 kernels, byte 0x2C is in the reserved area and is 0**, causing the bootloader to search for DTB magic from kernel start — never finding the actual appended DTB.
+
+**Fix**: After concatenating `vmlinuz + dtb`, write `kernel_size` (as u32 LE) at offset 0x2C of the resulting file:
+
+```python
+import struct
+kernel = open('vmlinuz','rb').read()
+dtb    = open('device.dtb','rb').read()
+kernel_patched = bytearray(kernel)
+struct.pack_into('<I', kernel_patched, 0x2C, len(kernel))  # ← the magic
+combined = bytes(kernel_patched) + dtb
+open('vmlinuz-with-dtb','wb').write(combined)
+```
+
+Then feed `vmlinuz-with-dtb` as `--kernel` to `mkbootimg`.
+
+**Also required**: Add `qcom,msm-id` and `qcom,board-id` root properties to the DTB matching the LK's expected board (for UFI001C / OpenStick zhihe boards):
+
+```
+qcom,msm-id   = <0xCE 0x0>       # MSM8916 v1
+qcom,board-id = <0x08 0x100>     # MTP + 512MB DDR
+```
+
+These values come from lk2nd's own bundled `msm8916-512mb-mtp.dts` — the ground truth for LK1ST.
+
+Without both fixes, boot fails silently and the board falls back to fastboot.
