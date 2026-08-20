@@ -1,0 +1,6 @@
+*.img
+*.img.zst
+*.tar.gz
+*.mbn
+bootloader/
+build/rootfs/
